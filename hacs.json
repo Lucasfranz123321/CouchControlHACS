@@ -1,0 +1,7 @@
+{
+  "name": "Couch Control",
+  "hacs": "1.6.0",
+  "domains": ["couch_control"],
+  "iot_class": "Local Polling",
+  "homeassistant": "2023.1.0"
+}

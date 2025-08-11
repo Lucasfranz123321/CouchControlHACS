@@ -1,0 +1,13 @@
+{
+  "domain": "couch_control",
+  "name": "Couch Control",
+  "version": "1.0.0",
+  "documentation": "https://github.com/lucasfranz/couch-control-hacs",
+  "issue_tracker": "https://github.com/lucasfranz/couch-control-hacs/issues",
+  "dependencies": [],
+  "codeowners": ["@lucasfranz"],
+  "requirements": [],
+  "config_flow": true,
+  "iot_class": "local_polling",
+  "integration_type": "helper"
+}
