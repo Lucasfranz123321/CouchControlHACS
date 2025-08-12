@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  homeassistant:
+    container_name: ha-test
+    image: homeassistant/home-assistant:latest
+    volumes:
+      - ./ha-config:/config
+      - ../custom_components:/config/custom_components
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    environment:
+      - DISABLE_JEMALLOC=true

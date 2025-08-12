@@ -1,0 +1,120 @@
+# Test Home Assistant Configuration
+homeassistant:
+  name: "Test HA"
+  latitude: 37.7749
+  longitude: -122.4194
+  elevation: 50
+  unit_system: metric
+  time_zone: America/Los_Angeles
+  
+# Enable the default recorder
+recorder:
+
+# Enable the default history
+history:
+
+# Enable the default logbook
+logbook:
+
+# Enable map
+map:
+
+# Enable sun
+sun:
+
+# Enable iOS app support
+mobile_app:
+
+# Create some test entities
+light:
+  - platform: template
+    lights:
+      test_light_1:
+        friendly_name: "Living Room Light"
+        level_template: "{{ states('input_number.test_brightness') | int }}"
+        value_template: "{{ states('input_boolean.test_light_1') }}"
+        turn_on:
+          service: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.test_light_1
+        turn_off:
+          service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.test_light_1
+        set_level:
+          service: input_number.set_value
+          target:
+            entity_id: input_number.test_brightness
+          data:
+            value: "{{ brightness }}"
+
+      test_light_2:
+        friendly_name: "Bedroom Light"
+        value_template: "{{ states('input_boolean.test_light_2') }}"
+        turn_on:
+          service: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.test_light_2
+        turn_off:
+          service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.test_light_2
+
+switch:
+  - platform: template
+    switches:
+      test_switch_1:
+        friendly_name: "Kitchen Fan"
+        value_template: "{{ states('input_boolean.test_switch_1') }}"
+        turn_on:
+          service: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.test_switch_1
+        turn_off:
+          service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.test_switch_1
+
+# Input helpers for the template entities
+input_boolean:
+  test_light_1:
+    name: "Test Light 1 State"
+  test_light_2:
+    name: "Test Light 2 State"
+  test_switch_1:
+    name: "Test Switch 1 State"
+
+input_number:
+  test_brightness:
+    name: "Test Light Brightness"
+    initial: 100
+    min: 0
+    max: 255
+    step: 1
+
+# Sensors for testing
+sensor:
+  - platform: template
+    sensors:
+      test_temperature:
+        friendly_name: "Living Room Temperature"
+        unit_of_measurement: "°C"
+        value_template: "{{ (20 + (now().minute % 10)) | round(1) }}"
+        
+      test_humidity:
+        friendly_name: "Living Room Humidity"
+        unit_of_measurement: "%"
+        value_template: "{{ (45 + (now().second % 20)) | round(1) }}"
+
+# Create lots of dummy entities for performance testing
+template:
+  - sensor:
+      - name: "Dummy Sensor 1"
+        state: "{{ now().strftime('%H:%M:%S') }}"
+      - name: "Dummy Sensor 2"
+        state: "{{ range(1, 100) | random }}"
+      - name: "Dummy Sensor 3"
+        state: "online"
+
+# Enable demo platform for more entities
+demo:

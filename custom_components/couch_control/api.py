@@ -156,9 +156,38 @@ class CouchControlInfoView(HomeAssistantView):
         })
 
 
+class CouchControlClearView(HomeAssistantView):
+    """View to clear all filtered entities."""
+
+    url = "/api/couch_control/clear"
+    name = "api:couch_control:clear"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Clear all filtered entities."""
+        hass = request.app["hass"]
+        
+        if DOMAIN not in hass.data:
+            return web.json_response(
+                {"error": "Couch Control not configured"}, status=400
+            )
+        
+        # Clear stored entities
+        hass.data[DOMAIN]["entities"] = []
+        await async_save_entities(hass, {"entities": []})
+        
+        _LOGGER.info("Couch Control: Cleared all filtered entities via clear endpoint")
+        
+        return web.json_response({
+            "success": True,
+            "message": "All filtered entities cleared"
+        })
+
+
 async def async_setup_api(hass: HomeAssistant) -> None:
     """Set up the REST API."""
     hass.http.register_view(CouchControlEntitiesView())
     hass.http.register_view(CouchControlInfoView())
+    hass.http.register_view(CouchControlClearView())
     
     _LOGGER.info("Couch Control REST API endpoints registered")

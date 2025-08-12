@@ -6,6 +6,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.components.http import HomeAssistantView
 
 from .const import DOMAIN, CONF_SELECTED_ENTITIES
+from .api import async_setup_api
+from .websocket_api import async_setup_websocket_api
+from .storage import async_load_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,15 +20,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry
     
-    # Only register views once
-    if "views_registered" not in hass.data[DOMAIN]:
-        # Register the API endpoint for filtered states
+    # Only register APIs once
+    if "apis_registered" not in hass.data[DOMAIN]:
+        # Load stored entities for API-based filtering
+        stored_data = await async_load_entities(hass)
+        hass.data[DOMAIN]["entities"] = stored_data.get("entities", [])
+        
+        # Set up REST API endpoints
+        await async_setup_api(hass)
+        
+        # Set up WebSocket API endpoints
+        await async_setup_websocket_api(hass)
+        
+        # Register the legacy states endpoint for backwards compatibility
         hass.http.register_view(CouchControlStatesView(hass))
         
         # Register info endpoint
         hass.http.register_view(CouchControlInfoView())
         
-        hass.data[DOMAIN]["views_registered"] = True
+        hass.data[DOMAIN]["apis_registered"] = True
+        _LOGGER.info("Couch Control APIs registered successfully")
     
     return True
 
@@ -58,11 +72,13 @@ class CouchControlStatesView(HomeAssistantView):
     async def get(self, request):
         """Return filtered states for Couch Control."""
         try:
-            # Collect entities from all config entries
+            # Collect entities from all sources
             all_selected_entities = set()
             
+            # 1. Config-based entities (from UI setup)
+            config_entities = 0
             for entry_id, entry in self.hass.data[DOMAIN].items():
-                if entry_id == "views_registered":
+                if entry_id in ["apis_registered", "entities"]:
                     continue
                     
                 selected_entities = entry.options.get(CONF_SELECTED_ENTITIES, [])
@@ -70,6 +86,11 @@ class CouchControlStatesView(HomeAssistantView):
                     selected_entities = entry.data.get(CONF_SELECTED_ENTITIES, [])
                 
                 all_selected_entities.update(selected_entities)
+                config_entities += len(selected_entities)
+            
+            # 2. API-based entities (from tvOS app)
+            api_entities = self.hass.data[DOMAIN].get("entities", [])
+            all_selected_entities.update(api_entities)
             
             # Filter states to only include selected entities
             filtered_states = []
@@ -78,7 +99,7 @@ class CouchControlStatesView(HomeAssistantView):
                 if state:
                     filtered_states.append(state.as_dict())
             
-            _LOGGER.info(f"Couch Control: Returning {len(filtered_states)} filtered entities from {len(self.hass.data[DOMAIN]) - 1} config entries")
+            _LOGGER.info(f"Couch Control: Returning {len(filtered_states)} filtered entities ({config_entities} from config, {len(api_entities)} from API)")
             return web.json_response(filtered_states)
             
         except Exception as e:
