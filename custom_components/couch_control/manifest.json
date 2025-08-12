@@ -1,14 +1,13 @@
 {
   "domain": "couch_control",
-  "name": "Couch Control",
-  "version": "1.0.0",
-  "documentation": "https://github.com/Lucasfranz123321/CouchControlHACS",
-  "issue_tracker": "https://github.com/Lucasfranz123321/CouchControlHACS/issues",
-  "dependencies": [],
+  "name": "Couch Control Entity Filter",
   "codeowners": ["@lucasfranz"],
-  "requirements": [],
   "config_flow": true,
-  "iot_class": "local_polling",
+  "dependencies": ["websocket_api"],
+  "documentation": "https://github.com/yourusername/couch-control-hacs",
   "integration_type": "helper",
-  "single_config_entry": false
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/yourusername/couch-control-hacs/issues",
+  "requirements": [],
+  "version": "1.0.0"
 }

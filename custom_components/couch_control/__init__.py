@@ -1,122 +1,141 @@
-"""Couch Control integration for Home Assistant."""
-import logging
-from aiohttp import web
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.components.http import HomeAssistantView
+"""Couch Control Entity Filter for Home Assistant."""
+from __future__ import annotations
 
-from .const import DOMAIN, CONF_SELECTED_ENTITIES
-from .api import async_setup_api
+import logging
+from typing import Any
+
+from homeassistant.components import websocket_api
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_state_change_event
+
+from .const import DOMAIN, STORAGE_KEY, STORAGE_VERSION, CONF_ENTITIES
+from .storage import async_load_entities, async_save_entities
 from .websocket_api import async_setup_websocket_api
-from .storage import async_load_entities
+from .api import async_setup_api
 
 _LOGGER = logging.getLogger(__name__)
 
+
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Set up the Couch Control component."""
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Couch Control from a config entry."""
-    _LOGGER.info(f"Setting up Couch Control integration: {entry.title}")
-    
-    # Store the entry data
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry
-    
-    # Only register APIs once
-    if "apis_registered" not in hass.data[DOMAIN]:
-        # Load stored entities for API-based filtering
-        stored_data = await async_load_entities(hass)
-        hass.data[DOMAIN]["entities"] = stored_data.get("entities", [])
+    try:
+        hass.data.setdefault(DOMAIN, {})
         
-        # Set up REST API endpoints
-        await async_setup_api(hass)
+        # Load stored entity selections
+        try:
+            stored_entities = await async_load_entities(hass)
+            entities = stored_entities.get("entities", [])
+        except Exception as ex:
+            _LOGGER.exception("Error loading stored entities, using config data")
+            entities = entry.data.get(CONF_ENTITIES, [])
         
-        # Set up WebSocket API endpoints
-        await async_setup_websocket_api(hass)
+        hass.data[DOMAIN]["entities"] = entities
+        hass.data[DOMAIN]["entry"] = entry
         
-        # Register the legacy states endpoint for backwards compatibility
-        hass.http.register_view(CouchControlStatesView(hass))
+        # Set up WebSocket API
+        try:
+            await async_setup_websocket_api(hass)
+        except Exception as ex:
+            _LOGGER.exception("Error setting up WebSocket API")
+            return False
         
-        # Register info endpoint
-        hass.http.register_view(CouchControlInfoView())
+        # Set up REST API
+        try:
+            await async_setup_api(hass)
+        except Exception as ex:
+            _LOGGER.exception("Error setting up REST API")
+            return False
         
-        hass.data[DOMAIN]["apis_registered"] = True
-        _LOGGER.info("Couch Control APIs registered successfully")
-    
-    return True
+        # Register services
+        try:
+            await _async_setup_services(hass)
+        except Exception as ex:
+            _LOGGER.exception("Error setting up services")
+            return False
+        
+        # Add update listener
+        entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+        
+        _LOGGER.info("Couch Control Entity Filter setup completed successfully")
+        return True
+        
+    except Exception as ex:
+        _LOGGER.exception("Error setting up Couch Control integration")
+        return False
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    _LOGGER.info("Unloading Couch Control integration")
-    
-    # Clean up
-    hass.data[DOMAIN].pop(entry.entry_id, None)
-    
-    return True
-
-async def async_remove_config_entry_device(
-    hass: HomeAssistant, config_entry: ConfigEntry, device_entry
-) -> bool:
-    """Remove a config entry from a device."""
-    return True
-
-class CouchControlStatesView(HomeAssistantView):
-    """API view for filtered entity states."""
-    
-    url = "/api/couch_control/states"
-    name = "api:couch_control:states"
-    requires_auth = True
-    
-    def __init__(self, hass: HomeAssistant):
-        """Initialize the view."""
-        self.hass = hass
-
-    async def get(self, request):
-        """Return filtered states for Couch Control."""
+    try:
+        # Remove services (with error handling)
         try:
-            # Collect entities from all sources
-            all_selected_entities = set()
-            
-            # 1. Config-based entities (from UI setup)
-            config_entities = 0
-            for entry_id, entry in self.hass.data[DOMAIN].items():
-                if entry_id in ["apis_registered", "entities"]:
-                    continue
-                    
-                selected_entities = entry.options.get(CONF_SELECTED_ENTITIES, [])
-                if not selected_entities:
-                    selected_entities = entry.data.get(CONF_SELECTED_ENTITIES, [])
-                
-                all_selected_entities.update(selected_entities)
-                config_entities += len(selected_entities)
-            
-            # 2. API-based entities (from tvOS app)
-            api_entities = self.hass.data[DOMAIN].get("entities", [])
-            all_selected_entities.update(api_entities)
-            
-            # Filter states to only include selected entities
-            filtered_states = []
-            for entity_id in all_selected_entities:
-                state = self.hass.states.get(entity_id)
-                if state:
-                    filtered_states.append(state.as_dict())
-            
-            _LOGGER.info(f"Couch Control: Returning {len(filtered_states)} filtered entities ({config_entities} from config, {len(api_entities)} from API)")
-            return web.json_response(filtered_states)
-            
-        except Exception as e:
-            _LOGGER.error(f"Error in Couch Control states endpoint: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            hass.services.async_remove(DOMAIN, "add_entity")
+            hass.services.async_remove(DOMAIN, "remove_entity")
+            hass.services.async_remove(DOMAIN, "set_entities")
+        except Exception as ex:
+            _LOGGER.warning("Error removing services during unload: %s", ex)
+        
+        # Clear data
+        if DOMAIN in hass.data:
+            hass.data[DOMAIN].clear()
+        
+        _LOGGER.info("Couch Control Entity Filter unloaded successfully")
+        return True
+        
+    except Exception as ex:
+        _LOGGER.exception("Error unloading Couch Control integration")
+        return False
 
-class CouchControlInfoView(HomeAssistantView):
-    """Info endpoint to detect integration presence."""
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload config entry."""
+    await async_unload_entry(hass, entry)
+    await async_setup_entry(hass, entry)
+
+
+async def _async_setup_services(hass: HomeAssistant) -> None:
+    """Set up services for Couch Control."""
     
-    url = "/api/couch_control/info"
-    name = "api:couch_control:info"
-    requires_auth = True
-
-    async def get(self, request):
-        """Return integration info."""
-        return web.json_response({
-            "integration": "couch_control",
-            "version": "1.0.0",
-            "status": "active"
-        })
+    @callback
+    def add_entity(call):
+        """Add an entity to the filter list."""
+        entity_id = call.data.get("entity_id")
+        if entity_id and entity_id not in hass.data[DOMAIN]["entities"]:
+            hass.data[DOMAIN]["entities"].append(entity_id)
+            hass.async_create_task(
+                async_save_entities(hass, {"entities": hass.data[DOMAIN]["entities"]})
+            )
+            _LOGGER.info("Added %s to Couch Control filter", entity_id)
+    
+    @callback
+    def remove_entity(call):
+        """Remove an entity from the filter list."""
+        entity_id = call.data.get("entity_id")
+        if entity_id in hass.data[DOMAIN]["entities"]:
+            hass.data[DOMAIN]["entities"].remove(entity_id)
+            hass.async_create_task(
+                async_save_entities(hass, {"entities": hass.data[DOMAIN]["entities"]})
+            )
+            _LOGGER.info("Removed %s from Couch Control filter", entity_id)
+    
+    @callback
+    def set_entities(call):
+        """Set the complete entity filter list."""
+        entities = call.data.get("entities", [])
+        hass.data[DOMAIN]["entities"] = entities
+        hass.async_create_task(
+            async_save_entities(hass, {"entities": entities})
+        )
+        _LOGGER.info("Updated Couch Control filter with %d entities", len(entities))
+    
+    hass.services.async_register(DOMAIN, "add_entity", add_entity)
+    hass.services.async_register(DOMAIN, "remove_entity", remove_entity)
+    hass.services.async_register(DOMAIN, "set_entities", set_entities)
