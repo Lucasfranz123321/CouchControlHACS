@@ -1,0 +1,33 @@
+add_entity:
+  name: Add Entity to Filter
+  description: Add an entity to the Couch Control filter list
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The entity ID to add to the filter
+      required: true
+      selector:
+        entity:
+
+remove_entity:
+  name: Remove Entity from Filter
+  description: Remove an entity from the Couch Control filter list
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The entity ID to remove from the filter
+      required: true
+      selector:
+        entity:
+
+set_entities:
+  name: Set Filter Entities
+  description: Set the complete list of entities for the Couch Control filter
+  fields:
+    entities:
+      name: Entities
+      description: List of entity IDs to include in the filter
+      required: true
+      selector:
+        entity:
+          multiple: true

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+import uuid
 
 import voluptuous as vol
 
@@ -26,9 +27,17 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the initial step."""
         if user_input is not None:
+            # Create a unique title for each instance
+            entity_count = len(user_input.get(CONF_SELECTED_ENTITIES, []))
+            title = f"Couch Control ({entity_count} entities)"
+            
+            # Generate a unique ID for this config entry
+            unique_id = str(uuid.uuid4())
+            await self.async_set_unique_id(unique_id)
+            
             return self.async_create_entry(
-                title="Couch Control",
-                data={},
+                title=title,
+                data={"unique_id": unique_id},
                 options={CONF_SELECTED_ENTITIES: user_input.get(CONF_SELECTED_ENTITIES, [])},
             )
 
@@ -49,7 +58,7 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(
                         multiple=True,
                         filter=selector.EntityFilterSelectorConfig(
-                            domain=["light", "switch", "sensor", "binary_sensor", "media_player", "climate", "weather", "scene", "calendar"]
+                            domain=["light", "switch", "sensor", "binary_sensor", "media_player", "climate", "weather", "scene", "calendar", "automation", "script", "input_boolean", "input_select", "input_number"]
                         )
                     )
                 ),
@@ -88,7 +97,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(
                         multiple=True,
                         filter=selector.EntityFilterSelectorConfig(
-                            domain=["light", "switch", "sensor", "binary_sensor", "media_player", "climate", "weather", "scene", "calendar"]
+                            domain=["light", "switch", "sensor", "binary_sensor", "media_player", "climate", "weather", "scene", "calendar", "automation", "script", "input_boolean", "input_select", "input_number"]
                         )
                     )
                 ),

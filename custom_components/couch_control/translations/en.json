@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Couch Control Entity Filter",
+        "description": "Select which entities should be accessible to the Couch Control app. Only selected entities will be sent via WebSocket connections, improving performance for large Home Assistant instances.\n\nTotal entities available: {entity_count}",
+        "data": {
+          "entities": "Entities to include in Couch Control"
+        }
+      }
+    },
+    "error": {
+      "unknown": "An unknown error occurred. Please try again.",
+      "no_entities": "No entities found in Home Assistant. Please ensure you have some devices configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update Couch Control Entity Filter",
+        "description": "Modify which entities are accessible to the Couch Control app.\n\nTotal entities: {entity_count}\nCurrently selected: {selected_count}",
+        "data": {
+          "entities": "Entities to include in Couch Control"
+        }
+      }
+    },
+    "error": {
+      "unknown": "An unknown error occurred while updating settings. Please try again.",
+      "no_entities": "No entities found in Home Assistant. Please ensure you have some devices configured."
+    }
+  },
+  "services": {
+    "add_entity": {
+      "name": "Add Entity to Filter",
+      "description": "Add an entity to the Couch Control filter list."
+    },
+    "remove_entity": {
+      "name": "Remove Entity from Filter",
+      "description": "Remove an entity from the Couch Control filter list."
+    },
+    "set_entities": {
+      "name": "Set Filter Entities",
+      "description": "Set the complete list of entities for the Couch Control filter."
+    }
+  }
+}
