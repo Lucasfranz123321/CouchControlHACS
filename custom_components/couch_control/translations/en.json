@@ -7,6 +7,13 @@
         "data": {
           "entities": "Entities to include in Couch Control"
         }
+      },
+      "success": {
+        "title": "Couch Control Entity Filter - Setup Complete",
+        "description": "Successfully configured {entity_count} entities for Couch Control.\n\nFor the changes to take full effect, we recommend restarting Home Assistant server.",
+        "data": {
+          "restart": "Restart Home Assistant Server"
+        }
       }
     },
     "error": {
@@ -21,6 +28,13 @@
         "description": "Modify which entities are accessible to the Couch Control app.\n\nTotal entities: {entity_count}\nCurrently selected: {selected_count}",
         "data": {
           "entities": "Entities to include in Couch Control"
+        }
+      },
+      "success": {
+        "title": "Couch Control Entity Filter - Update Complete",
+        "description": "Successfully updated {entity_count} entities for Couch Control.\n\nFor the changes to take full effect, we recommend restarting Home Assistant server.",
+        "data": {
+          "restart": "Restart Home Assistant Server"
         }
       }
     },

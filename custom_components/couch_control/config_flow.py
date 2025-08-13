@@ -11,6 +11,7 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import entity_registry as er, area_registry as ar, config_validation as cv
+from homeassistant.helpers.service import async_call_from_config
 
 from .const import CONF_ENTITIES, DOMAIN
 from .storage import async_load_entities, async_save_entities
@@ -54,13 +55,11 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Save the valid entities to storage
                 await async_save_entities(self.hass, {"entities": valid_entities})
                 
-                # Create the config entry
-                return self.async_create_entry(
-                    title="Couch Control Entity Filter",
-                    data={
-                        CONF_ENTITIES: valid_entities,
-                    },
-                )
+                # Store entities for success step
+                self._entities = valid_entities
+                
+                # Go to success step instead of creating entry directly
+                return await self.async_step_success()
             except Exception as ex:
                 _LOGGER.exception("Error creating config entry")
                 errors["base"] = "unknown"
@@ -114,6 +113,41 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={"base": "unknown"},
             )
 
+    async def async_step_success(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the success step with restart option."""
+        if user_input is not None:
+            if user_input.get("restart", False):
+                # Restart Home Assistant
+                try:
+                    await self.hass.services.async_call(
+                        "homeassistant", "restart", {}, blocking=False
+                    )
+                except Exception as ex:
+                    _LOGGER.exception("Error restarting Home Assistant")
+            
+            # Create the config entry
+            return self.async_create_entry(
+                title="Couch Control Entity Filter",
+                data={
+                    CONF_ENTITIES: self._entities,
+                },
+            )
+        
+        # Show success form with restart option
+        return self.async_show_form(
+            step_id="success",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("restart", default=True): bool,
+                }
+            ),
+            description_placeholders={
+                "entity_count": str(len(self._entities)),
+            },
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(
@@ -129,6 +163,7 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
+        self._entities: list[str] = []
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -156,7 +191,11 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 if DOMAIN in self.hass.data:
                     self.hass.data[DOMAIN]["entities"] = valid_entities
                 
-                return self.async_create_entry(title="", data={CONF_ENTITIES: valid_entities})
+                # Store entities for success step
+                self._entities = valid_entities
+                
+                # Go to success step instead of creating entry directly
+                return await self.async_step_success()
             except Exception as ex:
                 _LOGGER.exception("Error updating options")
                 errors["base"] = "unknown"
@@ -226,3 +265,33 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 data_schema=vol.Schema({}),
                 errors={"base": "unknown"},
             )
+
+    async def async_step_success(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the success step with restart option for options flow."""
+        if user_input is not None:
+            if user_input.get("restart", False):
+                # Restart Home Assistant
+                try:
+                    await self.hass.services.async_call(
+                        "homeassistant", "restart", {}, blocking=False
+                    )
+                except Exception as ex:
+                    _LOGGER.exception("Error restarting Home Assistant")
+            
+            # Create the options entry
+            return self.async_create_entry(title="", data={CONF_ENTITIES: self._entities})
+        
+        # Show success form with restart option
+        return self.async_show_form(
+            step_id="success",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("restart", default=True): bool,
+                }
+            ),
+            description_placeholders={
+                "entity_count": str(len(self._entities)),
+            },
+        )
