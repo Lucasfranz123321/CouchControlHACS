@@ -9,10 +9,13 @@
         }
       },
       "success": {
-        "title": "Couch Control Entity Filter - Setup Complete",
-        "description": "Successfully configured {entity_count} entities for Couch Control.\n\nFor the changes to take full effect, we recommend restarting Home Assistant server.",
+        "title": "Setup Complete",
+        "description": "Successfully configured {entity_count} entities for Couch Control.\n\nFor the changes to take full effect, Home Assistant needs to be restarted.",
         "data": {
-          "restart": "Restart Home Assistant Server"
+          "restart": "Restart Home Assistant Server now"
+        },
+        "data_description": {
+          "restart": "Check this box to automatically restart Home Assistant. This is required for the Couch Control integration to work properly."
         }
       }
     },
@@ -31,10 +34,13 @@
         }
       },
       "success": {
-        "title": "Couch Control Entity Filter - Update Complete",
-        "description": "Successfully updated {entity_count} entities for Couch Control.\n\nFor the changes to take full effect, we recommend restarting Home Assistant server.",
+        "title": "Update Complete",
+        "description": "Successfully updated {entity_count} entities for Couch Control.\n\nFor the changes to take full effect, Home Assistant needs to be restarted.",
         "data": {
-          "restart": "Restart Home Assistant Server"
+          "restart": "Restart Home Assistant Server now"
+        },
+        "data_description": {
+          "restart": "Check this box to automatically restart Home Assistant. This is required for the updated entity selection to take effect."
         }
       }
     },
