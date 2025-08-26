@@ -44,7 +44,7 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 entities = user_input.get(CONF_ENTITIES, [])
                 
                 # Filter out header keys (they're not selectable entities)
-                entities = [e for e in entities if not e.startswith("_AREA_HEADER_")]
+                entities = [e for e in entities if not e.startswith("_DOMAIN_HEADER_")]
                 self._entities = entities
                 
                 # Validate entities exist
@@ -69,13 +69,11 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
 
         try:
-            # Get all available entities organized by rooms
+            # Get all available entities organized by type
             ent_reg = er.async_get(self.hass)
-            area_reg = ar.async_get(self.hass)
             
-            # Group entities by area/room
-            entities_by_area = {}
-            no_area_entities = {}
+            # Group entities by domain (Lights, Sensors, etc.)
+            entities_by_domain = {}
             
             for entry in ent_reg.entities.values():
                 if entry.disabled:
@@ -92,47 +90,41 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Format: "Friendly Name - entity.id (integration)"
                 display_name = f"{friendly_name} - {entity_id} ({platform})"
                 
-                # Group by area
-                area_name = None
-                try:
-                    if entry.area_id:
-                        area = area_reg.async_get_area(entry.area_id)
-                        if area:
-                            area_name = area.name
-                except Exception:
-                    # If area lookup fails, treat as no area
-                    pass
+                # Group by domain type
+                domain_display = {
+                    "light": "💡 Lights",
+                    "sensor": "📊 Sensors", 
+                    "binary_sensor": "🔘 Binary Sensors",
+                    "switch": "🔌 Switches",
+                    "media_player": "📺 Media Players",
+                    "camera": "📹 Cameras",
+                    "climate": "🌡️ Climate",
+                    "cover": "🪟 Covers",
+                    "fan": "🌀 Fans",
+                    "lock": "🔒 Locks",
+                    "alarm_control_panel": "🚨 Alarms",
+                    "device_tracker": "📍 Device Trackers",
+                    "weather": "🌤️ Weather",
+                    "sun": "☀️ Sun",
+                }.get(domain, f"🔧 {domain.title()}")
                 
-                if area_name:
-                    if area_name not in entities_by_area:
-                        entities_by_area[area_name] = {}
-                    entities_by_area[area_name][entity_id] = display_name
-                else:
-                    no_area_entities[entity_id] = display_name
+                if domain_display not in entities_by_domain:
+                    entities_by_domain[domain_display] = {}
+                entities_by_domain[domain_display][entity_id] = display_name
             
-            # Create organized entity list: areas first (alphabetically), then no-area entities
+            # Create organized entity list
             all_entities = {}
             
-            # Add entities grouped by area (sorted alphabetically by area name)
-            for area_name in sorted(entities_by_area.keys()):
-                area_entities = entities_by_area[area_name]
-                # Add area header (styled to indicate non-selectable)
-                area_header_key = f"_AREA_HEADER_{area_name}"
-                all_entities[area_header_key] = f"🏠 ═══ {area_name.upper()} ═══ (Room Header - Not Selectable)"
+            # Add entities grouped by domain (sorted alphabetically)
+            for domain_name in sorted(entities_by_domain.keys()):
+                domain_entities = entities_by_domain[domain_name]
+                # Add domain header
+                domain_header_key = f"_DOMAIN_HEADER_{domain_name}"
+                all_entities[domain_header_key] = f"{domain_name} ({len(domain_entities)} items) - Header Not Selectable"
                 
-                # Add entities in this area (sorted alphabetically)
-                for entity_id in sorted(area_entities.keys()):
-                    all_entities[entity_id] = f"    {area_entities[entity_id]}"
-            
-            # Add entities with no area at the end
-            if no_area_entities:
-                # Add "No Room" header (styled to indicate non-selectable)
-                no_area_header_key = "_AREA_HEADER_NO_AREA"
-                all_entities[no_area_header_key] = "🏠 ═══ NO ROOM ═══ (Room Header - Not Selectable)"
-                
-                # Add entities without area (sorted alphabetically)
-                for entity_id in sorted(no_area_entities.keys()):
-                    all_entities[entity_id] = f"    {no_area_entities[entity_id]}"
+                # Add entities in this domain (sorted alphabetically)
+                for entity_id in sorted(domain_entities.keys()):
+                    all_entities[entity_id] = f"    {domain_entities[entity_id]}"
 
             # Load existing selections (with error handling)
             try:
@@ -143,31 +135,10 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 existing_entities = []
 
             # Filter out header keys for counting and validation
-            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_AREA_HEADER_")}
+            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_DOMAIN_HEADER_")}
 
             if not selectable_entities:
                 errors["base"] = "no_entities"
-
-            # Create a custom multi_select that excludes header keys
-            def custom_multi_select(entities_dict):
-                """Custom multi_select that filters out non-selectable header keys."""
-                def validate_selection(selected_entities):
-                    if not isinstance(selected_entities, list):
-                        selected_entities = [selected_entities] if selected_entities else []
-                    
-                    # Filter out any header keys that might have been selected
-                    valid_selection = [e for e in selected_entities if not str(e).startswith("_AREA_HEADER_")]
-                    
-                    # Validate that all selected entities exist in our selectable entities
-                    selectable_keys = {k for k in entities_dict.keys() if not k.startswith("_AREA_HEADER_")}
-                    invalid_entities = [e for e in valid_selection if e not in selectable_keys]
-                    
-                    if invalid_entities:
-                        raise vol.Invalid(f"Invalid entities selected: {invalid_entities}")
-                    
-                    return valid_selection
-                
-                return vol.All(cv.ensure_list, validate_selection)
 
             return self.async_show_form(
                 step_id="user",
@@ -175,7 +146,7 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     {
                         vol.Optional(
                             CONF_ENTITIES, default=existing_entities
-                        ): custom_multi_select(all_entities),
+                        ): cv.multi_select(all_entities),
                     }
                 ),
                 errors=errors,
@@ -255,7 +226,7 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 entities = user_input.get(CONF_ENTITIES, [])
                 
                 # Filter out header keys (they're not selectable entities)
-                entities = [e for e in entities if not e.startswith("_AREA_HEADER_")]
+                entities = [e for e in entities if not e.startswith("_DOMAIN_HEADER_")]
                 
                 # Validate entities exist
                 ent_reg = er.async_get(self.hass)
@@ -282,13 +253,11 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "unknown"
 
         try:
-            # Get all available entities organized by rooms
+            # Get all available entities organized by type
             ent_reg = er.async_get(self.hass)
-            area_reg = ar.async_get(self.hass)
             
-            # Group entities by area/room
-            entities_by_area = {}
-            no_area_entities = {}
+            # Group entities by domain (Lights, Sensors, etc.)
+            entities_by_domain = {}
             
             for entry in ent_reg.entities.values():
                 if entry.disabled:
@@ -305,47 +274,41 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 # Format: "Friendly Name - entity.id (integration)"
                 display_name = f"{friendly_name} - {entity_id} ({platform})"
                 
-                # Group by area
-                area_name = None
-                try:
-                    if entry.area_id:
-                        area = area_reg.async_get_area(entry.area_id)
-                        if area:
-                            area_name = area.name
-                except Exception:
-                    # If area lookup fails, treat as no area
-                    pass
+                # Group by domain type with icons
+                domain_display = {
+                    "light": "💡 Lights",
+                    "sensor": "📊 Sensors", 
+                    "binary_sensor": "🔘 Binary Sensors",
+                    "switch": "🔌 Switches",
+                    "media_player": "📺 Media Players",
+                    "camera": "📹 Cameras",
+                    "climate": "🌡️ Climate",
+                    "cover": "🪟 Covers",
+                    "fan": "🌀 Fans",
+                    "lock": "🔒 Locks",
+                    "alarm_control_panel": "🚨 Alarms",
+                    "device_tracker": "📍 Device Trackers",
+                    "weather": "🌤️ Weather",
+                    "sun": "☀️ Sun",
+                }.get(domain, f"🔧 {domain.title()}")
                 
-                if area_name:
-                    if area_name not in entities_by_area:
-                        entities_by_area[area_name] = {}
-                    entities_by_area[area_name][entity_id] = display_name
-                else:
-                    no_area_entities[entity_id] = display_name
+                if domain_display not in entities_by_domain:
+                    entities_by_domain[domain_display] = {}
+                entities_by_domain[domain_display][entity_id] = display_name
             
-            # Create organized entity list: areas first (alphabetically), then no-area entities
+            # Create organized entity list
             all_entities = {}
             
-            # Add entities grouped by area (sorted alphabetically by area name)
-            for area_name in sorted(entities_by_area.keys()):
-                area_entities = entities_by_area[area_name]
-                # Add area header (styled to indicate non-selectable)
-                area_header_key = f"_AREA_HEADER_{area_name}"
-                all_entities[area_header_key] = f"🏠 ═══ {area_name.upper()} ═══ (Room Header - Not Selectable)"
+            # Add entities grouped by domain (sorted alphabetically)
+            for domain_name in sorted(entities_by_domain.keys()):
+                domain_entities = entities_by_domain[domain_name]
+                # Add domain header
+                domain_header_key = f"_DOMAIN_HEADER_{domain_name}"
+                all_entities[domain_header_key] = f"{domain_name} ({len(domain_entities)} items) - Header Not Selectable"
                 
-                # Add entities in this area (sorted alphabetically)
-                for entity_id in sorted(area_entities.keys()):
-                    all_entities[entity_id] = f"    {area_entities[entity_id]}"
-            
-            # Add entities with no area at the end
-            if no_area_entities:
-                # Add "No Room" header (styled to indicate non-selectable)
-                no_area_header_key = "_AREA_HEADER_NO_AREA"
-                all_entities[no_area_header_key] = "🏠 ═══ NO ROOM ═══ (Room Header - Not Selectable)"
-                
-                # Add entities without area (sorted alphabetically)
-                for entity_id in sorted(no_area_entities.keys()):
-                    all_entities[entity_id] = f"    {no_area_entities[entity_id]}"
+                # Add entities in this domain (sorted alphabetically)
+                for entity_id in sorted(domain_entities.keys()):
+                    all_entities[entity_id] = f"    {domain_entities[entity_id]}"
 
             # Get current entities (with error handling)
             current_entities = []
@@ -361,31 +324,10 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 current_entities = []
 
             # Filter out header keys for counting and validation
-            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_AREA_HEADER_")}
+            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_DOMAIN_HEADER_")}
             
             if not selectable_entities:
                 errors["base"] = "no_entities"
-
-            # Create a custom multi_select that excludes header keys
-            def custom_multi_select(entities_dict):
-                """Custom multi_select that filters out non-selectable header keys."""
-                def validate_selection(selected_entities):
-                    if not isinstance(selected_entities, list):
-                        selected_entities = [selected_entities] if selected_entities else []
-                    
-                    # Filter out any header keys that might have been selected
-                    valid_selection = [e for e in selected_entities if not str(e).startswith("_AREA_HEADER_")]
-                    
-                    # Validate that all selected entities exist in our selectable entities
-                    selectable_keys = {k for k in entities_dict.keys() if not k.startswith("_AREA_HEADER_")}
-                    invalid_entities = [e for e in valid_selection if e not in selectable_keys]
-                    
-                    if invalid_entities:
-                        raise vol.Invalid(f"Invalid entities selected: {invalid_entities}")
-                    
-                    return valid_selection
-                
-                return vol.All(cv.ensure_list, validate_selection)
 
             return self.async_show_form(
                 step_id="init",
@@ -393,7 +335,7 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                     {
                         vol.Optional(
                             CONF_ENTITIES, default=current_entities
-                        ): custom_multi_select(all_entities),
+                        ): cv.multi_select(all_entities),
                     }
                 ),
                 errors=errors,
