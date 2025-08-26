@@ -73,10 +73,16 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if entry.disabled:
                     continue
                     
-                # Create display name
-                display_name = entry.name or entry.original_name or entry.entity_id
-                domain = entry.entity_id.split(".")[0]
-                display_name = f"{display_name} ({domain})"
+                # Create display name with entity ID and integration
+                friendly_name = entry.name or entry.original_name or entry.entity_id
+                entity_id = entry.entity_id
+                domain = entity_id.split(".")[0]
+                
+                # Get the integration/platform name
+                platform = entry.platform if entry.platform else "unknown"
+                
+                # Format: "Friendly Name - entity.id (integration)"
+                display_name = f"{friendly_name} - {entity_id} ({platform})"
                 
                 all_entities[entry.entity_id] = display_name
 
@@ -209,22 +215,28 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 if entry.disabled:
                     continue
                     
-                # Create display name with domain and area
-                display_name = entry.name or entry.original_name or entry.entity_id
-                domain = entry.entity_id.split(".")[0]
+                # Create display name with entity ID and integration
+                friendly_name = entry.name or entry.original_name or entry.entity_id
+                entity_id = entry.entity_id
+                domain = entity_id.split(".")[0]
+                
+                # Get the integration/platform name
+                platform = entry.platform if entry.platform else "unknown"
                 
                 # Add area if available (with error handling)
+                area_prefix = ""
                 try:
                     if entry.area_id:
                         area_reg = ar.async_get(self.hass)
                         area = area_reg.async_get_area(entry.area_id)
                         if area:
-                            display_name = f"{area.name} - {display_name}"
+                            area_prefix = f"{area.name} - "
                 except Exception:
-                    # If area lookup fails, just use the entity name
+                    # If area lookup fails, just continue without area
                     pass
                 
-                display_name = f"{display_name} ({domain})"
+                # Format: "[Area - ]Friendly Name - entity.id (integration)"
+                display_name = f"{area_prefix}{friendly_name} - {entity_id} ({platform})"
                 all_entities[entry.entity_id] = display_name
 
             # Get current entities (with error handling)
