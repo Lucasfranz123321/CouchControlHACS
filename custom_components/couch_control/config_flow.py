@@ -116,9 +116,9 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Add entities grouped by area (sorted alphabetically by area name)
             for area_name in sorted(entities_by_area.keys()):
                 area_entities = entities_by_area[area_name]
-                # Add area header
+                # Add area header (styled to indicate non-selectable)
                 area_header_key = f"_AREA_HEADER_{area_name}"
-                all_entities[area_header_key] = f"📍 {area_name.upper()}"
+                all_entities[area_header_key] = f"🏠 ═══ {area_name.upper()} ═══ (Room Header - Not Selectable)"
                 
                 # Add entities in this area (sorted alphabetically)
                 for entity_id in sorted(area_entities.keys()):
@@ -126,9 +126,9 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             
             # Add entities with no area at the end
             if no_area_entities:
-                # Add "No Room" header
+                # Add "No Room" header (styled to indicate non-selectable)
                 no_area_header_key = "_AREA_HEADER_NO_AREA"
-                all_entities[no_area_header_key] = "📍 NO ROOM"
+                all_entities[no_area_header_key] = "🏠 ═══ NO ROOM ═══ (Room Header - Not Selectable)"
                 
                 # Add entities without area (sorted alphabetically)
                 for entity_id in sorted(no_area_entities.keys()):
@@ -148,13 +148,34 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not selectable_entities:
                 errors["base"] = "no_entities"
 
+            # Create a custom multi_select that excludes header keys
+            def custom_multi_select(entities_dict):
+                """Custom multi_select that filters out non-selectable header keys."""
+                def validate_selection(selected_entities):
+                    if not isinstance(selected_entities, list):
+                        selected_entities = [selected_entities] if selected_entities else []
+                    
+                    # Filter out any header keys that might have been selected
+                    valid_selection = [e for e in selected_entities if not str(e).startswith("_AREA_HEADER_")]
+                    
+                    # Validate that all selected entities exist in our selectable entities
+                    selectable_keys = {k for k in entities_dict.keys() if not k.startswith("_AREA_HEADER_")}
+                    invalid_entities = [e for e in valid_selection if e not in selectable_keys]
+                    
+                    if invalid_entities:
+                        raise vol.Invalid(f"Invalid entities selected: {invalid_entities}")
+                    
+                    return valid_selection
+                
+                return vol.All(cv.ensure_list, validate_selection)
+
             return self.async_show_form(
                 step_id="user",
                 data_schema=vol.Schema(
                     {
                         vol.Optional(
                             CONF_ENTITIES, default=existing_entities
-                        ): cv.multi_select(all_entities),
+                        ): custom_multi_select(all_entities),
                     }
                 ),
                 errors=errors,
@@ -308,9 +329,9 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
             # Add entities grouped by area (sorted alphabetically by area name)
             for area_name in sorted(entities_by_area.keys()):
                 area_entities = entities_by_area[area_name]
-                # Add area header
+                # Add area header (styled to indicate non-selectable)
                 area_header_key = f"_AREA_HEADER_{area_name}"
-                all_entities[area_header_key] = f"📍 {area_name.upper()}"
+                all_entities[area_header_key] = f"🏠 ═══ {area_name.upper()} ═══ (Room Header - Not Selectable)"
                 
                 # Add entities in this area (sorted alphabetically)
                 for entity_id in sorted(area_entities.keys()):
@@ -318,9 +339,9 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
             
             # Add entities with no area at the end
             if no_area_entities:
-                # Add "No Room" header
+                # Add "No Room" header (styled to indicate non-selectable)
                 no_area_header_key = "_AREA_HEADER_NO_AREA"
-                all_entities[no_area_header_key] = "📍 NO ROOM"
+                all_entities[no_area_header_key] = "🏠 ═══ NO ROOM ═══ (Room Header - Not Selectable)"
                 
                 # Add entities without area (sorted alphabetically)
                 for entity_id in sorted(no_area_entities.keys()):
@@ -345,13 +366,34 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
             if not selectable_entities:
                 errors["base"] = "no_entities"
 
+            # Create a custom multi_select that excludes header keys
+            def custom_multi_select(entities_dict):
+                """Custom multi_select that filters out non-selectable header keys."""
+                def validate_selection(selected_entities):
+                    if not isinstance(selected_entities, list):
+                        selected_entities = [selected_entities] if selected_entities else []
+                    
+                    # Filter out any header keys that might have been selected
+                    valid_selection = [e for e in selected_entities if not str(e).startswith("_AREA_HEADER_")]
+                    
+                    # Validate that all selected entities exist in our selectable entities
+                    selectable_keys = {k for k in entities_dict.keys() if not k.startswith("_AREA_HEADER_")}
+                    invalid_entities = [e for e in valid_selection if e not in selectable_keys]
+                    
+                    if invalid_entities:
+                        raise vol.Invalid(f"Invalid entities selected: {invalid_entities}")
+                    
+                    return valid_selection
+                
+                return vol.All(cv.ensure_list, validate_selection)
+
             return self.async_show_form(
                 step_id="init",
                 data_schema=vol.Schema(
                     {
                         vol.Optional(
                             CONF_ENTITIES, default=current_entities
-                        ): cv.multi_select(all_entities),
+                        ): custom_multi_select(all_entities),
                     }
                 ),
                 errors=errors,
