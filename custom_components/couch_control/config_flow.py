@@ -10,7 +10,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers import entity_registry as er, area_registry as ar, config_validation as cv
+from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr, config_validation as cv
 from homeassistant.helpers.service import async_call_from_config
 
 from .const import CONF_ENTITIES, DOMAIN
@@ -72,6 +72,7 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Get all available entities organized by areas/rooms
             ent_reg = er.async_get(self.hass)
             area_reg = ar.async_get(self.hass)
+            dev_reg = dr.async_get(self.hass)
             
             # Group entities by area/room
             entities_by_area = {}
@@ -91,13 +92,21 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Format: "Friendly Name - entity.id (integration)"
                 display_name = f"{friendly_name} - {entity_id} ({platform})"
                 
-                # Group by area/room
+                # Group by area/room - check both entity area and device area
                 area_name = None
                 try:
+                    # First check if entity is directly assigned to an area
                     if entry.area_id:
                         area = area_reg.async_get_area(entry.area_id)
                         if area:
                             area_name = area.name
+                    # If no direct entity area, check device area
+                    elif entry.device_id:
+                        device = dev_reg.async_get(entry.device_id)
+                        if device and device.area_id:
+                            area = area_reg.async_get_area(device.area_id)
+                            if area:
+                                area_name = area.name
                 except Exception:
                     pass
                 
@@ -262,6 +271,7 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
             # Get all available entities organized by areas/rooms
             ent_reg = er.async_get(self.hass)
             area_reg = ar.async_get(self.hass)
+            dev_reg = dr.async_get(self.hass)
             
             # Group entities by area/room
             entities_by_area = {}
@@ -281,13 +291,21 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 # Format: "Friendly Name - entity.id (integration)"
                 display_name = f"{friendly_name} - {entity_id} ({platform})"
                 
-                # Group by area/room
+                # Group by area/room - check both entity area and device area
                 area_name = None
                 try:
+                    # First check if entity is directly assigned to an area
                     if entry.area_id:
                         area = area_reg.async_get_area(entry.area_id)
                         if area:
                             area_name = area.name
+                    # If no direct entity area, check device area
+                    elif entry.device_id:
+                        device = dev_reg.async_get(entry.device_id)
+                        if device and device.area_id:
+                            area = area_reg.async_get_area(device.area_id)
+                            if area:
+                                area_name = area.name
                 except Exception:
                     pass
                 
