@@ -41,7 +41,11 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 # Store the selected entities
-                self._entities = user_input.get(CONF_ENTITIES, [])
+                entities = user_input.get(CONF_ENTITIES, [])
+                
+                # Filter out header keys (they're not selectable entities)
+                entities = [e for e in entities if not e.startswith("_AREA_HEADER_")]
+                self._entities = entities
                 
                 # Validate entities exist
                 ent_reg = er.async_get(self.hass)
@@ -65,9 +69,13 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
 
         try:
-            # Get all available entities
+            # Get all available entities organized by rooms
             ent_reg = er.async_get(self.hass)
-            all_entities = {}
+            area_reg = ar.async_get(self.hass)
+            
+            # Group entities by area/room
+            entities_by_area = {}
+            no_area_entities = {}
             
             for entry in ent_reg.entities.values():
                 if entry.disabled:
@@ -84,7 +92,47 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Format: "Friendly Name - entity.id (integration)"
                 display_name = f"{friendly_name} - {entity_id} ({platform})"
                 
-                all_entities[entry.entity_id] = display_name
+                # Group by area
+                area_name = None
+                try:
+                    if entry.area_id:
+                        area = area_reg.async_get_area(entry.area_id)
+                        if area:
+                            area_name = area.name
+                except Exception:
+                    # If area lookup fails, treat as no area
+                    pass
+                
+                if area_name:
+                    if area_name not in entities_by_area:
+                        entities_by_area[area_name] = {}
+                    entities_by_area[area_name][entity_id] = display_name
+                else:
+                    no_area_entities[entity_id] = display_name
+            
+            # Create organized entity list: areas first (alphabetically), then no-area entities
+            all_entities = {}
+            
+            # Add entities grouped by area (sorted alphabetically by area name)
+            for area_name in sorted(entities_by_area.keys()):
+                area_entities = entities_by_area[area_name]
+                # Add area header
+                area_header_key = f"_AREA_HEADER_{area_name}"
+                all_entities[area_header_key] = f"📍 {area_name.upper()}"
+                
+                # Add entities in this area (sorted alphabetically)
+                for entity_id in sorted(area_entities.keys()):
+                    all_entities[entity_id] = f"    {area_entities[entity_id]}"
+            
+            # Add entities with no area at the end
+            if no_area_entities:
+                # Add "No Room" header
+                no_area_header_key = "_AREA_HEADER_NO_AREA"
+                all_entities[no_area_header_key] = "📍 NO ROOM"
+                
+                # Add entities without area (sorted alphabetically)
+                for entity_id in sorted(no_area_entities.keys()):
+                    all_entities[entity_id] = f"    {no_area_entities[entity_id]}"
 
             # Load existing selections (with error handling)
             try:
@@ -94,7 +142,10 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Error loading existing entities")
                 existing_entities = []
 
-            if not all_entities:
+            # Filter out header keys for counting and validation
+            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_AREA_HEADER_")}
+
+            if not selectable_entities:
                 errors["base"] = "no_entities"
 
             return self.async_show_form(
@@ -108,7 +159,7 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 errors=errors,
                 description_placeholders={
-                    "entity_count": str(len(all_entities)),
+                    "entity_count": str(len(selectable_entities)),
                 },
             )
         except Exception as ex:
@@ -182,6 +233,9 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 # Save the updated entities
                 entities = user_input.get(CONF_ENTITIES, [])
                 
+                # Filter out header keys (they're not selectable entities)
+                entities = [e for e in entities if not e.startswith("_AREA_HEADER_")]
+                
                 # Validate entities exist
                 ent_reg = er.async_get(self.hass)
                 valid_entities = []
@@ -207,9 +261,13 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "unknown"
 
         try:
-            # Get all available entities
+            # Get all available entities organized by rooms
             ent_reg = er.async_get(self.hass)
-            all_entities = {}
+            area_reg = ar.async_get(self.hass)
+            
+            # Group entities by area/room
+            entities_by_area = {}
+            no_area_entities = {}
             
             for entry in ent_reg.entities.values():
                 if entry.disabled:
@@ -223,21 +281,50 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 # Get the integration/platform name
                 platform = entry.platform if entry.platform else "unknown"
                 
-                # Add area if available (with error handling)
-                area_prefix = ""
+                # Format: "Friendly Name - entity.id (integration)"
+                display_name = f"{friendly_name} - {entity_id} ({platform})"
+                
+                # Group by area
+                area_name = None
                 try:
                     if entry.area_id:
-                        area_reg = ar.async_get(self.hass)
                         area = area_reg.async_get_area(entry.area_id)
                         if area:
-                            area_prefix = f"{area.name} - "
+                            area_name = area.name
                 except Exception:
-                    # If area lookup fails, just continue without area
+                    # If area lookup fails, treat as no area
                     pass
                 
-                # Format: "[Area - ]Friendly Name - entity.id (integration)"
-                display_name = f"{area_prefix}{friendly_name} - {entity_id} ({platform})"
-                all_entities[entry.entity_id] = display_name
+                if area_name:
+                    if area_name not in entities_by_area:
+                        entities_by_area[area_name] = {}
+                    entities_by_area[area_name][entity_id] = display_name
+                else:
+                    no_area_entities[entity_id] = display_name
+            
+            # Create organized entity list: areas first (alphabetically), then no-area entities
+            all_entities = {}
+            
+            # Add entities grouped by area (sorted alphabetically by area name)
+            for area_name in sorted(entities_by_area.keys()):
+                area_entities = entities_by_area[area_name]
+                # Add area header
+                area_header_key = f"_AREA_HEADER_{area_name}"
+                all_entities[area_header_key] = f"📍 {area_name.upper()}"
+                
+                # Add entities in this area (sorted alphabetically)
+                for entity_id in sorted(area_entities.keys()):
+                    all_entities[entity_id] = f"    {area_entities[entity_id]}"
+            
+            # Add entities with no area at the end
+            if no_area_entities:
+                # Add "No Room" header
+                no_area_header_key = "_AREA_HEADER_NO_AREA"
+                all_entities[no_area_header_key] = "📍 NO ROOM"
+                
+                # Add entities without area (sorted alphabetically)
+                for entity_id in sorted(no_area_entities.keys()):
+                    all_entities[entity_id] = f"    {no_area_entities[entity_id]}"
 
             # Get current entities (with error handling)
             current_entities = []
@@ -252,7 +339,10 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 _LOGGER.exception("Error loading current entities")
                 current_entities = []
 
-            if not all_entities:
+            # Filter out header keys for counting and validation
+            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_AREA_HEADER_")}
+            
+            if not selectable_entities:
                 errors["base"] = "no_entities"
 
             return self.async_show_form(
@@ -266,7 +356,7 @@ class CouchControlOptionsFlow(config_entries.OptionsFlow):
                 ),
                 errors=errors,
                 description_placeholders={
-                    "entity_count": str(len(all_entities)),
+                    "entity_count": str(len(selectable_entities)),
                     "selected_count": str(len(current_entities)),
                 },
             )
