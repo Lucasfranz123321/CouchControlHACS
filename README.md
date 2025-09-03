@@ -18,19 +18,6 @@ The Couch Control app normally loads ALL entities from your Home Assistant serve
 8. When prompted, choose the devices to expose inside Couch Control app
 9. Restart Couch Control and HACS integration
 
-## Configuration
-
-After installing the integration:
-
-1. Go to **Settings → Devices & Services → Helpers**
-2. Click **"Add Helper"** and search for **"Couch Control"**
-3. Select the entities you want to use in your widgets:
-   - Lights, switches, and scenes for control widgets
-   - Sensors for temperature, humidity, and other data widgets
-   - Media players for media control widgets
-   - Weather entities for weather widgets
-   - Calendar entities for calendar widgets
-
 ## Benefits
 
 - **Faster Loading**: Only selected entities are processed
