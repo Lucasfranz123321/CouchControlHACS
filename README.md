@@ -8,21 +8,15 @@ The Couch Control app normally loads ALL entities from your Home Assistant serve
 
 ## Installation
 
-1. **Install via HACS**:
-   - Open HACS in Home Assistant
-   - Go to "Integrations"
-   - Search for "Couch Control"
-   - Install the integration
-
-2. **Add the integration**:
-   - Go to Settings → Devices & Services → Helpers
-   - Click "Add Helper"
-   - Search for "Couch Control"
-   - Select the entities you want to use in your widgets
-
-3. **Restart your Couch Control app**:
-   - The app will automatically detect the integration
-   - Only selected entities will be loaded for improved performance
+1. Go to HACS page in Home Assistant
+2. Press on the 3 dots on the top right
+3. Press on 'Custom Repositories'
+4. Add this URL: https://github.com/Lucasfranz123321/CouchControlHACS as Integration
+5.  Press on 'Couch Control' inside HACS and press download
+6. Go to Devices & Services, press "add integration" and look for 'Couch Control'
+7. Install the Couch Control integration
+8. When prompted, choose the devices to expose inside Couch Control app
+9. Restart Couch Control and HACS integration
 
 ## Configuration
 
