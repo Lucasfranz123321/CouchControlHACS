@@ -42,11 +42,11 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 # Store the selected entities
                 entities = user_input.get(CONF_ENTITIES, [])
-                
+
                 # Filter out header keys (they're not selectable entities)
                 entities = [e for e in entities if not e.startswith("_AREA_HEADER_")]
                 self._entities = entities
-                
+
                 # Validate entities exist
                 ent_reg = er.async_get(self.hass)
                 valid_entities = []
@@ -55,13 +55,15 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         valid_entities.append(entity_id)
                     else:
                         _LOGGER.warning("Entity %s does not exist, removing from selection", entity_id)
-                
-                # Save the valid entities to storage
-                await async_save_entities(self.hass, {"entities": valid_entities})
-                
-                # Store entities for success step
+
+                # Defer the storage write to `async_step_success` so a
+                # user who closes the dialog *after* picking entities
+                # but *before* confirming doesn't leave an orphaned
+                # storage file behind. The persisted file used to be
+                # written here, which is part of why deleted
+                # integrations felt sticky on re-install.
                 self._entities = valid_entities
-                
+
                 # Go to success step instead of creating entry directly
                 return await self.async_step_success()
             except Exception as ex:
@@ -141,13 +143,14 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 for entity_id in sorted(no_area_entities.keys()):
                     all_entities[entity_id] = f"    {no_area_entities[entity_id]}"
 
-            # Load existing selections (with error handling)
-            try:
-                existing_data = await async_load_entities(self.hass)
-                existing_entities = existing_data.get("entities", [])
-            except Exception as ex:
-                _LOGGER.exception("Error loading existing entities")
-                existing_entities = []
+            # Initial-add flow shows an empty default. Reading from
+            # storage here would re-populate the form with leftover
+            # entities from a *previous* install (which was the
+            # symptom users described as "deletion didn't work — it
+            # kept staying"). Existing selections are still loaded
+            # by the **options** flow below, which is the right
+            # place to do it — that's the "edit" entry point.
+            existing_entities: list[str] = []
 
             # Filter out header keys for counting and validation
             selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_AREA_HEADER_")}
@@ -182,6 +185,15 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the success step with restart option."""
         if user_input is not None:
+            # Persist the selected entities only now, once the user
+            # has actually confirmed creation. Writing earlier (in
+            # `async_step_user`) used to leave an orphaned storage
+            # file if the user closed the dialog at this step.
+            try:
+                await async_save_entities(self.hass, {"entities": self._entities})
+            except Exception:
+                _LOGGER.exception("Error saving entities to storage during config flow")
+
             if user_input.get("restart", False):
                 # Restart Home Assistant
                 try:
@@ -190,7 +202,7 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 except Exception as ex:
                     _LOGGER.exception("Error restarting Home Assistant")
-            
+
             # Create the config entry
             return self.async_create_entry(
                 title="Couch Control Entity Filter",

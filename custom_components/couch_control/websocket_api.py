@@ -41,10 +41,21 @@ def handle_subscribe_filtered(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Handle filtered entity subscription."""
-    
+    # WS commands can't be unregistered in HA, so they linger until
+    # the next restart even after the user removes the integration.
+    # Bail out cleanly if the domain is gone instead of crashing on
+    # the missing key.
+    if DOMAIN not in hass.data:
+        connection.send_result(msg["id"], {"states": []})
+        return
+
     @callback
     def forward_events(event: Event) -> None:
         """Forward filtered state change events to the client."""
+        # Domain may have been popped between subscribe and now —
+        # treat as an empty allow-list and stop forwarding.
+        if DOMAIN not in hass.data:
+            return
         # Get the list of allowed entities
         allowed_entities = hass.data[DOMAIN].get("entities", [])
         
@@ -109,6 +120,9 @@ def handle_get_entities(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Handle request to get list of filtered entities."""
+    if DOMAIN not in hass.data:
+        connection.send_result(msg["id"], {"entities": []})
+        return
     entities = hass.data[DOMAIN].get("entities", [])
     
     # Get entity registry
@@ -150,6 +164,13 @@ def handle_update_entities(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Handle request to update filtered entities."""
+    if DOMAIN not in hass.data:
+        connection.send_error(
+            msg["id"],
+            "not_configured",
+            "Couch Control is not configured",
+        )
+        return
     entities = msg["entities"]
     
     # Validate entities exist

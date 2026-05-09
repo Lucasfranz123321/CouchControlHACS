@@ -10,6 +10,7 @@ from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, STORAGE_KEY, STORAGE_VERSION, CONF_ENTITIES
 from .storage import async_load_entities, async_save_entities
@@ -82,17 +83,39 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, "set_entities")
         except Exception as ex:
             _LOGGER.warning("Error removing services during unload: %s", ex)
-        
-        # Clear data
-        if DOMAIN in hass.data:
-            hass.data[DOMAIN].clear()
-        
+
+        # Pop the domain entirely instead of `clear()` so no empty
+        # container is left behind for handlers that test
+        # `if DOMAIN in hass.data`. Note that WebSocket commands and
+        # REST views registered during setup cannot be unregistered
+        # in HA — they're guarded inside their handlers to no-op
+        # when the domain is gone, so they degrade cleanly until HA
+        # restarts.
+        hass.data.pop(DOMAIN, None)
+
         _LOGGER.info("Couch Control Entity Filter unloaded successfully")
         return True
-        
+
     except Exception as ex:
         _LOGGER.exception("Error unloading Couch Control integration")
         return False
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete persisted storage when the user removes the integration.
+
+    Without this, the entity-selection list at `.storage/couch_control`
+    survives the deletion. The next time the user re-adds Couch
+    Control the config flow loads that file and pre-populates the
+    form with the old entities — which is what made the integration
+    feel like it 'kept staying' after the user clicked Delete.
+    """
+    store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+    try:
+        await store.async_remove()
+        _LOGGER.info("Couch Control storage removed during integration removal")
+    except Exception:
+        _LOGGER.exception("Error removing Couch Control storage")
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
