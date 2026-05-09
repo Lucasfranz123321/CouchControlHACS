@@ -1,4 +1,17 @@
-"""Config flow for Couch Control Entity Filter integration."""
+"""Config flow for Couch Control Entity Filter integration.
+
+The form exposes three independent selectors:
+
+  • Areas — every entity in the picked areas is included
+  • Devices — every entity belonging to the picked devices is included
+  • Entities — explicit individual entity ids
+
+The runtime filter is the union of all three resolved against the
+current entity / device / area registries (see `_resolve_filter` in
+`__init__.py`). Picking a whole area is a one-tap shortcut for
+"include everything in this room"; the entities field stays available
+for additions/exceptions that aren't covered by an area or device.
+"""
 from __future__ import annotations
 
 import logging
@@ -7,16 +20,57 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr, config_validation as cv
-from homeassistant.helpers.service import async_call_from_config
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.selector import (
+    AreaSelector,
+    AreaSelectorConfig,
+    DeviceSelector,
+    DeviceSelectorConfig,
+    EntitySelector,
+    EntitySelectorConfig,
+)
 
-from .const import CONF_ENTITIES, DOMAIN
+from .const import CONF_AREAS, CONF_DEVICES, CONF_ENTITIES, DOMAIN
 from .storage import async_load_entities, async_save_entities
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# Shared selector schema used by both the initial config flow and the
+# options flow. Defaults are wired in per-flow because the initial
+# flow always starts empty (avoids re-populating from a stale storage
+# file after a previous uninstall, see related comment in
+# `async_step_user`) while the options flow reads current values.
+def _selector_schema(
+    *,
+    default_entities: list[str],
+    default_areas: list[str],
+    default_devices: list[str],
+) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Optional(CONF_AREAS, default=default_areas): AreaSelector(
+                AreaSelectorConfig(multiple=True)
+            ),
+            vol.Optional(CONF_DEVICES, default=default_devices): DeviceSelector(
+                DeviceSelectorConfig(multiple=True)
+            ),
+            vol.Optional(CONF_ENTITIES, default=default_entities): EntitySelector(
+                EntitySelectorConfig(multiple=True)
+            ),
+        }
+    )
+
+
+def _filter_existing_entities(hass, entity_ids: list[str]) -> list[str]:
+    """Drop entity ids that no longer exist in the registry / state machine."""
+    ent_reg = er.async_get(hass)
+    return [
+        eid for eid in entity_ids
+        if eid in ent_reg.entities or hass.states.get(eid) is not None
+    ]
 
 
 class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -27,200 +81,90 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._entities: list[str] = []
+        self._areas: list[str] = []
+        self._devices: list[str] = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
-        # Check if already configured
+        # Single-instance: only one Couch Control config entry per HA.
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
-        
+
         errors: dict[str, str] = {}
-        
+
         if user_input is not None:
             try:
-                # Store the selected entities
-                entities = user_input.get(CONF_ENTITIES, [])
+                self._entities = _filter_existing_entities(
+                    self.hass, user_input.get(CONF_ENTITIES, [])
+                )
+                self._areas = list(user_input.get(CONF_AREAS, []))
+                self._devices = list(user_input.get(CONF_DEVICES, []))
 
-                # Filter out header keys (they're not selectable entities)
-                entities = [e for e in entities if not e.startswith("_AREA_HEADER_")]
-                self._entities = entities
-
-                # Validate entities exist
-                ent_reg = er.async_get(self.hass)
-                valid_entities = []
-                for entity_id in self._entities:
-                    if entity_id in ent_reg.entities or self.hass.states.get(entity_id):
-                        valid_entities.append(entity_id)
-                    else:
-                        _LOGGER.warning("Entity %s does not exist, removing from selection", entity_id)
-
-                # Defer the storage write to `async_step_success` so a
-                # user who closes the dialog *after* picking entities
-                # but *before* confirming doesn't leave an orphaned
-                # storage file behind. The persisted file used to be
-                # written here, which is part of why deleted
-                # integrations felt sticky on re-install.
-                self._entities = valid_entities
-
-                # Go to success step instead of creating entry directly
+                # Persistence is deferred to `async_step_success` —
+                # writing here used to leave an orphan storage file
+                # if the user closed the dialog at the success step.
                 return await self.async_step_success()
-            except Exception as ex:
-                _LOGGER.exception("Error creating config entry")
+            except Exception:
+                _LOGGER.exception("Error in config flow user step")
                 errors["base"] = "unknown"
 
-        try:
-            # Get all available entities organized by areas/rooms
-            ent_reg = er.async_get(self.hass)
-            area_reg = ar.async_get(self.hass)
-            dev_reg = dr.async_get(self.hass)
-            
-            # Group entities by area/room
-            entities_by_area = {}
-            no_area_entities = {}
-            
-            for entry in ent_reg.entities.values():
-                if entry.disabled:
-                    continue
-                    
-                # Create display name with entity ID and integration
-                friendly_name = entry.name or entry.original_name or entry.entity_id
-                entity_id = entry.entity_id
-                
-                # Get the integration/platform name
-                platform = entry.platform if entry.platform else "unknown"
-                
-                # Format: "Friendly Name - entity.id (integration)"
-                display_name = f"{friendly_name} - {entity_id} ({platform})"
-                
-                # Group by area/room - check both entity area and device area
-                area_name = None
-                try:
-                    # First check if entity is directly assigned to an area
-                    if entry.area_id:
-                        area = area_reg.async_get_area(entry.area_id)
-                        if area:
-                            area_name = area.name
-                    # If no direct entity area, check device area
-                    elif entry.device_id:
-                        device = dev_reg.async_get(entry.device_id)
-                        if device and device.area_id:
-                            area = area_reg.async_get_area(device.area_id)
-                            if area:
-                                area_name = area.name
-                except Exception:
-                    pass
-                
-                if area_name:
-                    if area_name not in entities_by_area:
-                        entities_by_area[area_name] = {}
-                    entities_by_area[area_name][entity_id] = display_name
-                else:
-                    no_area_entities[entity_id] = display_name
-            
-            # Create organized entity list
-            all_entities = {}
-            
-            # Add entities grouped by area (sorted alphabetically by area name)
-            for area_name in sorted(entities_by_area.keys()):
-                area_entities = entities_by_area[area_name]
-                # Add area header
-                area_header_key = f"_AREA_HEADER_{area_name}"
-                all_entities[area_header_key] = f"🏠 {area_name} ({len(area_entities)} items) - Header Not Selectable"
-                
-                # Add entities in this area (sorted alphabetically)
-                for entity_id in sorted(area_entities.keys()):
-                    all_entities[entity_id] = f"    {area_entities[entity_id]}"
-            
-            # Add entities with no area at the end
-            if no_area_entities:
-                # Add "No Area" header
-                no_area_header_key = "_AREA_HEADER_NO_AREA"
-                all_entities[no_area_header_key] = f"🚫 No Area Assigned ({len(no_area_entities)} items) - Header Not Selectable"
-                
-                # Add entities without area (sorted alphabetically)
-                for entity_id in sorted(no_area_entities.keys()):
-                    all_entities[entity_id] = f"    {no_area_entities[entity_id]}"
-
-            # Initial-add flow shows an empty default. Reading from
-            # storage here would re-populate the form with leftover
-            # entities from a *previous* install (which was the
-            # symptom users described as "deletion didn't work — it
-            # kept staying"). Existing selections are still loaded
-            # by the **options** flow below, which is the right
-            # place to do it — that's the "edit" entry point.
-            existing_entities: list[str] = []
-
-            # Filter out header keys for counting and validation
-            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_AREA_HEADER_")}
-
-            if not selectable_entities:
-                errors["base"] = "no_entities"
-
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema(
-                    {
-                        vol.Optional(
-                            CONF_ENTITIES, default=existing_entities
-                        ): cv.multi_select(all_entities),
-                    }
-                ),
-                errors=errors,
-                description_placeholders={
-                    "entity_count": str(len(selectable_entities)),
-                },
-            )
-        except Exception as ex:
-            _LOGGER.exception("Error in config flow")
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema({}),
-                errors={"base": "unknown"},
-            )
+        # Fresh add: start empty. Loading storage here would re-show
+        # entities from a *previous* install whose storage file still
+        # exists — which historically read as "the deletion didn't
+        # work". The options flow handles re-editing.
+        return self.async_show_form(
+            step_id="user",
+            data_schema=_selector_schema(
+                default_entities=[],
+                default_areas=[],
+                default_devices=[],
+            ),
+            errors=errors,
+        )
 
     async def async_step_success(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the success step with restart option."""
+        """Confirm and optionally restart Home Assistant."""
         if user_input is not None:
-            # Persist the selected entities only now, once the user
-            # has actually confirmed creation. Writing earlier (in
-            # `async_step_user`) used to leave an orphaned storage
-            # file if the user closed the dialog at this step.
             try:
-                await async_save_entities(self.hass, {"entities": self._entities})
+                await async_save_entities(
+                    self.hass,
+                    {
+                        CONF_ENTITIES: self._entities,
+                        CONF_AREAS: self._areas,
+                        CONF_DEVICES: self._devices,
+                    },
+                )
             except Exception:
-                _LOGGER.exception("Error saving entities to storage during config flow")
+                _LOGGER.exception("Error saving filter to storage during config flow")
 
             if user_input.get("restart", False):
-                # Restart Home Assistant
                 try:
                     await self.hass.services.async_call(
                         "homeassistant", "restart", {}, blocking=False
                     )
-                except Exception as ex:
+                except Exception:
                     _LOGGER.exception("Error restarting Home Assistant")
 
-            # Create the config entry
             return self.async_create_entry(
                 title="Couch Control Entity Filter",
                 data={
                     CONF_ENTITIES: self._entities,
+                    CONF_AREAS: self._areas,
+                    CONF_DEVICES: self._devices,
                 },
             )
-        
-        # Show success form with restart option
+
         return self.async_show_form(
             step_id="success",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("restart", default=True): bool,
-                }
-            ),
+            data_schema=vol.Schema({vol.Optional("restart", default=True): bool}),
             description_placeholders={
                 "entity_count": str(len(self._entities)),
+                "area_count": str(len(self._areas)),
+                "device_count": str(len(self._devices)),
             },
         )
 
@@ -234,192 +178,101 @@ class CouchControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class CouchControlOptionsFlow(config_entries.OptionsFlow):
-    """Handle Couch Control options."""
+    """Handle Couch Control options (edits to an existing entry)."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
         self._entities: list[str] = []
+        self._areas: list[str] = []
+        self._devices: list[str] = []
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
         errors: dict[str, str] = {}
-        
+
         if user_input is not None:
             try:
-                # Save the updated entities
-                entities = user_input.get(CONF_ENTITIES, [])
-                
-                # Filter out header keys (they're not selectable entities)
-                entities = [e for e in entities if not e.startswith("_AREA_HEADER_")]
-                
-                # Validate entities exist
-                ent_reg = er.async_get(self.hass)
-                valid_entities = []
-                for entity_id in entities:
-                    if entity_id in ent_reg.entities or self.hass.states.get(entity_id):
-                        valid_entities.append(entity_id)
-                    else:
-                        _LOGGER.warning("Entity %s does not exist, removing from selection", entity_id)
-                
-                await async_save_entities(self.hass, {"entities": valid_entities})
-                
-                # Update hass data if available
+                self._entities = _filter_existing_entities(
+                    self.hass, user_input.get(CONF_ENTITIES, [])
+                )
+                self._areas = list(user_input.get(CONF_AREAS, []))
+                self._devices = list(user_input.get(CONF_DEVICES, []))
+
+                await async_save_entities(
+                    self.hass,
+                    {
+                        CONF_ENTITIES: self._entities,
+                        CONF_AREAS: self._areas,
+                        CONF_DEVICES: self._devices,
+                    },
+                )
+
+                # Re-publish into hass.data so the runtime resolution
+                # picks up changes without a restart. The actual entity
+                # set is rebuilt in `async_setup_entry` /
+                # `async_reload_entry`; we rebuild it here too so
+                # WebSocket subscribers see the new filter immediately.
                 if DOMAIN in self.hass.data:
-                    self.hass.data[DOMAIN]["entities"] = valid_entities
-                
-                # Store entities for success step
-                self._entities = valid_entities
-                
-                # Go to success step instead of creating entry directly
+                    from . import _resolve_filter  # local import: avoid cycle
+                    resolved = _resolve_filter(
+                        self.hass,
+                        areas=self._areas,
+                        devices=self._devices,
+                        entities=self._entities,
+                    )
+                    self.hass.data[DOMAIN]["entities"] = list(resolved)
+                    self.hass.data[DOMAIN]["areas"] = self._areas
+                    self.hass.data[DOMAIN]["devices"] = self._devices
+
                 return await self.async_step_success()
-            except Exception as ex:
-                _LOGGER.exception("Error updating options")
+            except Exception:
+                _LOGGER.exception("Error in options flow")
                 errors["base"] = "unknown"
 
-        try:
-            # Get all available entities organized by areas/rooms
-            ent_reg = er.async_get(self.hass)
-            area_reg = ar.async_get(self.hass)
-            dev_reg = dr.async_get(self.hass)
-            
-            # Group entities by area/room
-            entities_by_area = {}
-            no_area_entities = {}
-            
-            for entry in ent_reg.entities.values():
-                if entry.disabled:
-                    continue
-                    
-                # Create display name with entity ID and integration
-                friendly_name = entry.name or entry.original_name or entry.entity_id
-                entity_id = entry.entity_id
-                
-                # Get the integration/platform name
-                platform = entry.platform if entry.platform else "unknown"
-                
-                # Format: "Friendly Name - entity.id (integration)"
-                display_name = f"{friendly_name} - {entity_id} ({platform})"
-                
-                # Group by area/room - check both entity area and device area
-                area_name = None
-                try:
-                    # First check if entity is directly assigned to an area
-                    if entry.area_id:
-                        area = area_reg.async_get_area(entry.area_id)
-                        if area:
-                            area_name = area.name
-                    # If no direct entity area, check device area
-                    elif entry.device_id:
-                        device = dev_reg.async_get(entry.device_id)
-                        if device and device.area_id:
-                            area = area_reg.async_get_area(device.area_id)
-                            if area:
-                                area_name = area.name
-                except Exception:
-                    pass
-                
-                if area_name:
-                    if area_name not in entities_by_area:
-                        entities_by_area[area_name] = {}
-                    entities_by_area[area_name][entity_id] = display_name
-                else:
-                    no_area_entities[entity_id] = display_name
-            
-            # Create organized entity list
-            all_entities = {}
-            
-            # Add entities grouped by area (sorted alphabetically by area name)
-            for area_name in sorted(entities_by_area.keys()):
-                area_entities = entities_by_area[area_name]
-                # Add area header
-                area_header_key = f"_AREA_HEADER_{area_name}"
-                all_entities[area_header_key] = f"🏠 {area_name} ({len(area_entities)} items) - Header Not Selectable"
-                
-                # Add entities in this area (sorted alphabetically)
-                for entity_id in sorted(area_entities.keys()):
-                    all_entities[entity_id] = f"    {area_entities[entity_id]}"
-            
-            # Add entities with no area at the end
-            if no_area_entities:
-                # Add "No Area" header
-                no_area_header_key = "_AREA_HEADER_NO_AREA"
-                all_entities[no_area_header_key] = f"🚫 No Area Assigned ({len(no_area_entities)} items) - Header Not Selectable"
-                
-                # Add entities without area (sorted alphabetically)
-                for entity_id in sorted(no_area_entities.keys()):
-                    all_entities[entity_id] = f"    {no_area_entities[entity_id]}"
-
-            # Get current entities (with error handling)
-            current_entities = []
-            try:
-                if DOMAIN in self.hass.data:
-                    current_entities = self.hass.data[DOMAIN].get("entities", [])
-                else:
-                    # Fall back to loading from storage
-                    stored_data = await async_load_entities(self.hass)
-                    current_entities = stored_data.get("entities", [])
-            except Exception as ex:
-                _LOGGER.exception("Error loading current entities")
-                current_entities = []
-
-            # Filter out header keys for counting and validation
-            selectable_entities = {k: v for k, v in all_entities.items() if not k.startswith("_AREA_HEADER_")}
-            
-            if not selectable_entities:
-                errors["base"] = "no_entities"
-
-            return self.async_show_form(
-                step_id="init",
-                data_schema=vol.Schema(
-                    {
-                        vol.Optional(
-                            CONF_ENTITIES, default=current_entities
-                        ): cv.multi_select(all_entities),
-                    }
-                ),
-                errors=errors,
-                description_placeholders={
-                    "entity_count": str(len(selectable_entities)),
-                    "selected_count": str(len(current_entities)),
-                },
-            )
-        except Exception as ex:
-            _LOGGER.exception("Error in options flow")
-            return self.async_show_form(
-                step_id="init",
-                data_schema=vol.Schema({}),
-                errors={"base": "unknown"},
-            )
+        # Load currently-stored selections so the form pre-fills with
+        # what the user picked last time.
+        current = await async_load_entities(self.hass)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_selector_schema(
+                default_entities=list(current.get(CONF_ENTITIES, [])),
+                default_areas=list(current.get(CONF_AREAS, [])),
+                default_devices=list(current.get(CONF_DEVICES, [])),
+            ),
+            errors=errors,
+        )
 
     async def async_step_success(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the success step with restart option for options flow."""
+        """Confirm and optionally restart Home Assistant."""
         if user_input is not None:
             if user_input.get("restart", False):
-                # Restart Home Assistant
                 try:
                     await self.hass.services.async_call(
                         "homeassistant", "restart", {}, blocking=False
                     )
-                except Exception as ex:
+                except Exception:
                     _LOGGER.exception("Error restarting Home Assistant")
-            
-            # Create the options entry
-            return self.async_create_entry(title="", data={CONF_ENTITIES: self._entities})
-        
-        # Show success form with restart option
+
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_ENTITIES: self._entities,
+                    CONF_AREAS: self._areas,
+                    CONF_DEVICES: self._devices,
+                },
+            )
+
         return self.async_show_form(
             step_id="success",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("restart", default=True): bool,
-                }
-            ),
+            data_schema=vol.Schema({vol.Optional("restart", default=True): bool}),
             description_placeholders={
                 "entity_count": str(len(self._entities)),
+                "area_count": str(len(self._areas)),
+                "device_count": str(len(self._devices)),
             },
         )

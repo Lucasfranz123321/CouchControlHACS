@@ -8,12 +8,76 @@ from homeassistant.components import persistent_notification, websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, STORAGE_KEY, STORAGE_VERSION, CONF_ENTITIES
+from .const import (
+    CONF_AREAS,
+    CONF_DEVICES,
+    CONF_ENTITIES,
+    DOMAIN,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+)
 from .storage import async_load_entities, async_save_entities
+
+
+def _resolve_filter(
+    hass: HomeAssistant,
+    *,
+    areas: list[str],
+    devices: list[str],
+    entities: list[str],
+) -> set[str]:
+    """Resolve area / device / entity selections to a flat entity-id set.
+
+    For each picked area, every entity assigned to that area (directly
+    or via its device's area) is included. For each picked device,
+    every entity registered to that device is included. Explicit
+    entity ids are added as-is. Result is unioned and deduplicated.
+
+    The set is rebuilt at setup time and on options-flow save. If a
+    user later assigns a *new* entity to an already-picked area, the
+    integration needs a reload (or restart) to see it — same trade-off
+    most HA filtering integrations make.
+    """
+    if not (areas or devices or entities):
+        return set()
+
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+
+    area_set = set(areas or [])
+    device_set = set(devices or [])
+    resolved: set[str] = set(entities or [])
+
+    if area_set or device_set:
+        # Pre-compute the device→area map so we can resolve entities
+        # whose `area_id` is unset but whose device sits in a picked
+        # area. Otherwise picking "Heimkino" would miss any entity
+        # that inherits its area from its device.
+        device_area = {dev.id: dev.area_id for dev in dev_reg.devices.values()}
+
+        for entry in ent_reg.entities.values():
+            if entry.disabled:
+                continue
+            # Direct device pick.
+            if entry.device_id and entry.device_id in device_set:
+                resolved.add(entry.entity_id)
+                continue
+            # Area pick: entity's own area, or its device's area.
+            entity_area = entry.area_id or (
+                device_area.get(entry.device_id) if entry.device_id else None
+            )
+            if entity_area and entity_area in area_set:
+                resolved.add(entry.entity_id)
+
+    return resolved
 from .websocket_api import async_setup_websocket_api
 from .api import async_setup_api
 
@@ -29,16 +93,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Couch Control from a config entry."""
     try:
         hass.data.setdefault(DOMAIN, {})
-        
-        # Load stored entity selections
+
+        # Load stored selections (areas, devices, individual entities).
+        # Older installs only stored `entities` — `.get(..., [])` keeps
+        # them working without a migration step.
         try:
-            stored_entities = await async_load_entities(hass)
-            entities = stored_entities.get("entities", [])
-        except Exception as ex:
-            _LOGGER.exception("Error loading stored entities, using config data")
-            entities = entry.data.get(CONF_ENTITIES, [])
-        
-        hass.data[DOMAIN]["entities"] = entities
+            stored = await async_load_entities(hass)
+            stored_areas = list(stored.get(CONF_AREAS, []))
+            stored_devices = list(stored.get(CONF_DEVICES, []))
+            stored_entities = list(stored.get(CONF_ENTITIES, []))
+        except Exception:
+            _LOGGER.exception("Error loading stored selections, using config data")
+            stored_areas = list(entry.data.get(CONF_AREAS, []))
+            stored_devices = list(entry.data.get(CONF_DEVICES, []))
+            stored_entities = list(entry.data.get(CONF_ENTITIES, []))
+
+        # Resolve area + device picks down to a flat entity-id set,
+        # unioned with any explicitly-selected entities. The runtime
+        # filter (WebSocket / REST / state-change handlers) only needs
+        # the resolved set; areas / devices are kept around so the
+        # options flow can re-display the user's actual picks.
+        resolved = _resolve_filter(
+            hass,
+            areas=stored_areas,
+            devices=stored_devices,
+            entities=stored_entities,
+        )
+        hass.data[DOMAIN]["entities"] = list(resolved)
+        hass.data[DOMAIN]["areas"] = stored_areas
+        hass.data[DOMAIN]["devices"] = stored_devices
         hass.data[DOMAIN]["entry"] = entry
         
         # Set up WebSocket API

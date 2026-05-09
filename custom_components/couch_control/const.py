@@ -5,6 +5,8 @@ STORAGE_KEY = "couch_control"
 STORAGE_VERSION = 1
 
 CONF_ENTITIES = "entities"
+CONF_AREAS = "areas"
+CONF_DEVICES = "devices"
 CONF_FILTER_MODE = "filter_mode"
 
 FILTER_MODE_INCLUDE = "include"
