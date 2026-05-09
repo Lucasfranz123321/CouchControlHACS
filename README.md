@@ -34,12 +34,22 @@ This integration provides two API endpoints for the Couch Control app:
 
 ## Uninstalling
 
-1. **Settings → Devices & Services** → find **Couch Control Entity Filter** → three-dot menu → **Delete**.
-   This removes the config entry, unregisters the WebSocket / REST handlers, and (via `async_remove_entry`) deletes the persisted entity allowlist at `.storage/couch_control` automatically.
-2. **HACS → Integrations → Couch Control → Remove** to delete the integration files from `custom_components/couch_control/`.
+**Recommended (one-service clean removal — added in 1.0.2):**
+
+1. **Developer Tools → Services** → search for **Couch Control: Uninstall (clean removal)** → **Call Service**.
+   The integration removes its own config entry and deletes the persisted entity allowlist at `.storage/couch_control` while its code is still loaded. You'll get a notification confirming success.
+2. **HACS → Integrations → Couch Control → Remove** to delete the integration files.
 3. Restart Home Assistant.
 
-> **Upgrading from 1.0.0?** That version was misclassified as `integration_type: "helper"`, which placed the card under **Helpers** instead of **Devices & Services** and hid the Delete button. After updating to 1.0.1 via HACS and restarting Home Assistant, the integration will move to **Devices & Services** and the standard delete flow above will work. If your install is still stuck on 1.0.0 and you can't update via HACS, you can manually edit `.storage/core.config_entries` and remove the block whose `"domain": "couch_control"` to clear the entry.
+**Alternative (UI-only, equivalent end state):**
+
+1. **Settings → Devices & Services** → find **Couch Control Entity Filter** → three-dot menu → **Delete**.
+   Same effect as the service in step 1 above (it routes through `async_remove_entry` either way).
+2. HACS → remove → restart HA.
+
+**Why the dedicated service exists**: if you remove the integration via HACS *first*, Home Assistant can no longer call any cleanup code from this integration (the module is gone), so the config entry and `.storage/couch_control` are stranded. HA does eventually offer a "missing integration" Delete button on the orphan entry after a restart, but the persisted file lingers. Calling `couch_control.uninstall` first does the cleanup while the code is still loaded, so HACS removal afterwards has nothing left to clean.
+
+> **Upgrading from 1.0.0?** That version was misclassified as `integration_type: "helper"`, which placed the card under **Helpers** instead of **Devices & Services** and hid the Delete button. Updating to 1.0.2 via HACS and restarting Home Assistant moves the integration to **Devices & Services** *and* gives you the new uninstall service. If your install is still stuck on 1.0.0 and you can't update via HACS, you can manually edit `.storage/core.config_entries` and remove the block whose `"domain": "couch_control"` to clear the entry.
 
 ## Support
 

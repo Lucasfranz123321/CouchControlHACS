@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components import websocket_api
+from homeassistant.components import persistent_notification, websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant, callback
@@ -81,6 +81,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, "add_entity")
             hass.services.async_remove(DOMAIN, "remove_entity")
             hass.services.async_remove(DOMAIN, "set_entities")
+            hass.services.async_remove(DOMAIN, "uninstall")
         except Exception as ex:
             _LOGGER.warning("Error removing services during unload: %s", ex)
 
@@ -158,7 +159,52 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             async_save_entities(hass, {"entities": entities})
         )
         _LOGGER.info("Updated Couch Control filter with %d entities", len(entities))
-    
+
+    async def uninstall(call):
+        """Clean uninstall: remove the config entry while the
+        integration code is still loaded.
+
+        Why this exists: when a user removes the integration via HACS,
+        HA can no longer execute `async_unload_entry` /
+        `async_remove_entry` because the module is gone — leaving an
+        orphaned config entry and the persisted storage file behind.
+        Running this service first triggers the normal HA removal
+        path (which calls our `async_remove_entry`, which deletes
+        `.storage/couch_control`), so the subsequent HACS file
+        deletion has nothing to mop up.
+        """
+        entry = hass.data.get(DOMAIN, {}).get("entry")
+        if entry is None:
+            _LOGGER.warning(
+                "Couch Control uninstall called but no config entry "
+                "was found — already uninstalled?"
+            )
+            return
+        entry_id = entry.entry_id
+        _LOGGER.info(
+            "Couch Control uninstall service called — removing config "
+            "entry %s and persisted storage", entry_id
+        )
+        await hass.config_entries.async_remove(entry_id)
+        _LOGGER.info(
+            "Couch Control config entry removed. You can now delete "
+            "the integration from HACS to remove the files."
+        )
+        # Surface a persistent notification so the user sees it without
+        # tailing logs — the typical user calls this from the UI and
+        # never sees `_LOGGER.info` output.
+        persistent_notification.async_create(
+            hass,
+            (
+                "Couch Control has been removed from Home Assistant. "
+                "Open HACS → Couch Control → Remove to delete the "
+                "integration files, then restart Home Assistant."
+            ),
+            title="Couch Control uninstalled",
+            notification_id=f"{DOMAIN}_uninstalled",
+        )
+
     hass.services.async_register(DOMAIN, "add_entity", add_entity)
     hass.services.async_register(DOMAIN, "remove_entity", remove_entity)
     hass.services.async_register(DOMAIN, "set_entities", set_entities)
+    hass.services.async_register(DOMAIN, "uninstall", uninstall)

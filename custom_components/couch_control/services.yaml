@@ -31,3 +31,11 @@ set_entities:
       selector:
         entity:
           multiple: true
+
+uninstall:
+  name: Uninstall (clean removal)
+  description: >
+    Remove the Couch Control config entry and delete its persisted storage.
+    Run this before removing the integration from HACS so cleanup happens
+    while the integration code is still loaded — afterwards HACS can delete
+    the files with nothing left behind.
