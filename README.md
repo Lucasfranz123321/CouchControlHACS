@@ -32,13 +32,22 @@ This integration provides two API endpoints for the Couch Control app:
 - `/api/couch_control/states` - Returns filtered entity states
 - `/api/couch_control/info` - Returns integration status
 
+## Uninstalling
+
+1. **Settings → Devices & Services** → find **Couch Control Entity Filter** → three-dot menu → **Delete**.
+   This removes the config entry, unregisters the WebSocket / REST handlers, and (via `async_remove_entry`) deletes the persisted entity allowlist at `.storage/couch_control` automatically.
+2. **HACS → Integrations → Couch Control → Remove** to delete the integration files from `custom_components/couch_control/`.
+3. Restart Home Assistant.
+
+> **Upgrading from 1.0.0?** That version was misclassified as `integration_type: "helper"`, which placed the card under **Helpers** instead of **Devices & Services** and hid the Delete button. After updating to 1.0.1 via HACS and restarting Home Assistant, the integration will move to **Devices & Services** and the standard delete flow above will work. If your install is still stuck on 1.0.0 and you can't update via HACS, you can manually edit `.storage/core.config_entries` and remove the block whose `"domain": "couch_control"` to clear the entry.
+
 ## Support
 
 If you encounter any issues:
 
 1. Check that you've selected entities in the helper configuration
 2. Restart both Home Assistant and the Couch Control app
-3. Report issues at: https://github.com/lucasfranz/couch-control-hacs/issues
+3. Report issues at: https://github.com/Lucasfranz123321/CouchControlHACS/issues
 
 ## Compatibility
 

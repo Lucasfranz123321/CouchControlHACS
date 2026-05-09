@@ -4,10 +4,10 @@
   "codeowners": ["@lucasfranz"],
   "config_flow": true,
   "dependencies": ["websocket_api"],
-  "documentation": "https://github.com/yourusername/couch-control-hacs",
-  "integration_type": "helper",
+  "documentation": "https://github.com/Lucasfranz123321/CouchControlHACS",
+  "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/yourusername/couch-control-hacs/issues",
+  "issue_tracker": "https://github.com/Lucasfranz123321/CouchControlHACS/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
